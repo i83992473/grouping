@@ -20,6 +20,14 @@ Copy `.env.example` to `.env` when you add a public API base URL (`VITE_API_BASE
 
 Remote: [https://github.com/i83992473/grouping.git](https://github.com/i83992473/grouping.git)
 
+After cloning, `origin` should point at that URL. Push from an account that can write to the repo:
+
+```bash
+git push -u origin main
+```
+
+If you see **403 Permission denied**, your machine is using another GitHub user (for example via cached HTTPS credentials or a different `gh auth` session). Sign in as the repo owner or use a **personal access token** with `repo` scope, or switch to **SSH** (`git@github.com:i83992473/grouping.git`) with a key registered on the correct GitHub account.
+
 ## AWS Amplify (hosting)
 
 This repo includes [`amplify.yml`](amplify.yml) so **Amplify Hosting** can run `npm ci` and `npm run build` and publish the `dist/` output.
