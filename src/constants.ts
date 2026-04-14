@@ -1,8 +1,15 @@
 ﻿export const CANVAS = {
   width: 800,
   height: 420,
-  group: { cx: 400, cy: 210, r: 140 },
 } as const
+
+/** Visual layout for root-level groups on the canvas (Venn-style overlap). */
+export type GroupCircle = { cx: number; cy: number; r: number }
+
+export const GROUP_CIRCLE_LAYOUT: Record<string, GroupCircle> = {
+  g1: { cx: 300, cy: 220, r: 125 },
+  g2: { cx: 500, cy: 220, r: 125 },
+}
 
 export const DND_ITEM_PREFIX = 'item:' as const
 export const DND_PALETTE_ID = 'droppable-palette' as const

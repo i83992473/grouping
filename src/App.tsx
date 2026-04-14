@@ -9,11 +9,20 @@
   type DragStartEvent,
 } from '@dnd-kit/core'
 import { useMemo, useState } from 'react'
-import { DND_PALETTE_ID, parseItemDragId } from './constants'
-import { GroupCanvas } from './components/GroupCanvas'
+import {
+  DND_PALETTE_ID,
+  GROUP_CIRCLE_LAYOUT,
+  parseItemDragId,
+} from './constants'
 import { ItemModal } from './components/ItemModal'
+import { MultiGroupCanvas } from './components/MultiGroupCanvas'
 import { Palette } from './components/Palette'
-import { directGroupIds, initials } from './model'
+import {
+  directGroupIds,
+  initials,
+  itemTooltipWithGroups,
+  layoutCanvasItemPositions,
+} from './model'
 import type { Group, Item, Membership } from './types'
 import './App.css'
 
@@ -26,6 +35,7 @@ const seedItems: Item[] = [
 
 const seedGroups: Group[] = [
   { id: 'g1', name: 'Core team', parentGroupId: null },
+  { id: 'g2', name: 'Design', parentGroupId: null },
 ]
 
 function addMembership(
@@ -56,6 +66,25 @@ function clearAllMembershipsForItem(
   return memberships.filter((m) => m.itemId !== itemId)
 }
 
+function dragEndHitsPalette(event: DragEndEvent): boolean {
+  if (event.over?.id === DND_PALETTE_ID) return true
+  return (event.collisions ?? []).some((c) => c.id === DND_PALETTE_ID)
+}
+
+/** All group droppables the pointer intersects (Venn overlap adds every hit). */
+function groupIdsFromDragEnd(event: DragEndEvent): string[] {
+  const raw = (event.collisions ?? [])
+    .map((c) => String(c.id))
+    .filter((id) => id.startsWith('droppable-group:'))
+    .map((id) => id.slice('droppable-group:'.length))
+  if (raw.length > 0) return [...new Set(raw)]
+  const oid = event.over ? String(event.over.id) : ''
+  if (oid.startsWith('droppable-group:')) {
+    return [oid.slice('droppable-group:'.length)]
+  }
+  return []
+}
+
 export default function App() {
   const [items, setItems] = useState<Item[]>(seedItems)
   const [groups] = useState<Group[]>(seedGroups)
@@ -67,22 +96,44 @@ export default function App() {
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
   )
 
-  const primaryGroup = groups[0]
-  if (!primaryGroup) {
-    throw new Error('Expected at least one group')
-  }
+  const canvasGroupIdSet = useMemo(
+    () =>
+      new Set(
+        groups
+          .filter((g) => GROUP_CIRCLE_LAYOUT[g.id] != null)
+          .map((g) => g.id),
+      ),
+    [groups],
+  )
+
+  const canvasGroups = useMemo(
+    () => groups.filter((g) => GROUP_CIRCLE_LAYOUT[g.id] != null),
+    [groups],
+  )
 
   const itemsOnPalette = useMemo(
     () => items.filter((i) => directGroupIds(i.id, memberships).size === 0),
     [items, memberships],
   )
 
-  const itemsInPrimary = useMemo(
+  const itemsOnCanvas = useMemo(
     () =>
-      items.filter((i) =>
-        directGroupIds(i.id, memberships).has(primaryGroup.id),
+      items.filter((i) => {
+        const d = directGroupIds(i.id, memberships)
+        return [...d].some((gid) => canvasGroupIdSet.has(gid))
+      }),
+    [items, memberships, canvasGroupIdSet],
+  )
+
+  const itemPositions = useMemo(
+    () =>
+      layoutCanvasItemPositions(
+        itemsOnCanvas,
+        memberships,
+        GROUP_CIRCLE_LAYOUT,
+        canvasGroupIdSet,
       ),
-    [items, memberships, primaryGroup.id],
+    [itemsOnCanvas, memberships, canvasGroupIdSet],
   )
 
   const activeDraggingItem = useMemo(() => {
@@ -97,34 +148,46 @@ export default function App() {
   }
 
   const handleDragEnd = (event: DragEndEvent) => {
-    const { active, over } = event
+    const { active } = event
     setActiveDragId(null)
     const itemId = parseItemDragId(active.id)
     if (!itemId) return
 
-    if (!over) return
-
-    if (over.id === DND_PALETTE_ID) {
+    if (dragEndHitsPalette(event)) {
       setMemberships((m) => clearAllMembershipsForItem(m, itemId))
       return
     }
 
-    const overStr = String(over.id)
-    if (overStr.startsWith('droppable-group:')) {
-      const gid = overStr.slice('droppable-group:'.length)
-      setMemberships((m) => addMembership(m, itemId, gid))
-    }
+    const groupIds = groupIdsFromDragEnd(event)
+    if (groupIds.length === 0) return
+
+    setMemberships((m) => {
+      let next = m
+      for (const gid of groupIds) {
+        next = addMembership(next, itemId, gid)
+      }
+      return next
+    })
   }
 
   const handleDragCancel = () => setActiveDragId(null)
+
+  const tooltipForItem = (item: Item) =>
+    itemTooltipWithGroups(item, groups, memberships)
+
+  const directCountOnCanvas = (item: Item) =>
+    [...directGroupIds(item.id, memberships)].filter((id) =>
+      canvasGroupIdSet.has(id),
+    ).length
 
   return (
     <div className={`app${activeDragId ? ' dnd-active' : ''}`.trim()}>
       <header className="app__header">
         <h1>Grouping</h1>
         <p className="app__sub">
-          Drag chips into the team circle or onto Ungrouped. Click a chip for
-          details. A short drag threshold separates click from drag.
+          Drag chips into one or both circles (overlap adds both groups), or
+          onto Ungrouped to clear. Click a chip for details. A short drag
+          threshold separates click from drag.
         </p>
       </header>
 
@@ -136,9 +199,13 @@ export default function App() {
         onDragCancel={handleDragCancel}
       >
         <div className="app__workspace">
-          <GroupCanvas
-            group={primaryGroup}
-            items={itemsInPrimary}
+          <MultiGroupCanvas
+            canvasGroups={canvasGroups}
+            layouts={GROUP_CIRCLE_LAYOUT}
+            items={itemsOnCanvas}
+            itemPositions={itemPositions}
+            tooltipForItem={tooltipForItem}
+            directCountOnCanvas={directCountOnCanvas}
             onOpenItem={setModalItem}
           />
           <Palette items={itemsOnPalette} onOpenItem={setModalItem} />

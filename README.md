@@ -1,6 +1,6 @@
 # Grouping
 
-Visual grouping UI: items as avatar chips, groups as circles, drag-and-drop with [@dnd-kit](https://github.com/clauderic/dnd-kit). State is in-memory today; persistence will go behind an API backed by a database (for example AWS RDS).
+Visual grouping UI: items as avatar chips, groups as circles, drag-and-drop with [@dnd-kit](https://github.com/clauderic/dnd-kit). **Two overlapping groups** are on the canvas; dropping in the **intersection** assigns **both** groups. State is in-memory; persistence will go behind an API (e.g. AWS RDS) later.
 
 ## Local development
 

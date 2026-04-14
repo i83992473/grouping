@@ -7,11 +7,22 @@ import type { Item } from '../types'
 type Props = {
   item: Item
   onOpen: (item: Item) => void
+  /** Accessible name / tooltip (e.g. include group names). */
+  title?: string
+  /** When in more than one group, show a small count badge. */
+  membershipBadge?: number
   style?: React.CSSProperties
   className?: string
 }
 
-export function ItemChip({ item, onOpen, style, className = '' }: Props) {
+export function ItemChip({
+  item,
+  onOpen,
+  title,
+  membershipBadge,
+  style,
+  className = '',
+}: Props) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: `${DND_ITEM_PREFIX}${item.id}`,
   })
@@ -22,18 +33,25 @@ export function ItemChip({ item, onOpen, style, className = '' }: Props) {
     zIndex: isDragging ? 20 : undefined,
   }
 
+  const tip = title ?? item.title
+
   return (
     <button
       type="button"
       ref={setNodeRef}
       className={`item-chip ${isDragging ? 'item-chip--dragging' : ''} ${className}`.trim()}
       style={dragStyle}
-      title={item.title}
+      title={tip}
       onClick={() => onOpen(item)}
       {...listeners}
       {...attributes}
     >
       <span className="item-chip__initials">{initials(item.title)}</span>
+      {membershipBadge != null && membershipBadge > 1 ? (
+        <span className="item-chip__badge" aria-hidden>
+          {membershipBadge}
+        </span>
+      ) : null}
     </button>
   )
 }
