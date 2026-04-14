@@ -1,6 +1,127 @@
 ﻿import { CANVAS, type GroupCircle } from './constants'
 import type { Group, Item, Membership } from './types'
 
+/** True if `ancestorId` is a strict ancestor of `descendantId` in the group tree. */
+export function isStrictAncestorOf(
+  groups: Group[],
+  ancestorId: string,
+  descendantId: string,
+): boolean {
+  const byId = groupById(groups)
+  let c = byId.get(descendantId)
+  while (c) {
+    if (c.parentGroupId === ancestorId) return true
+    if (!c.parentGroupId) return false
+    c = byId.get(c.parentGroupId)
+  }
+  return false
+}
+
+/**
+ * When multiple nested droppables hit (parent + child), keep only the deepest groups
+ * so dropping in the inner circle assigns the child only; inheritance still adds the parent logically.
+ * Unrelated overlaps (two roots) keep both.
+ */
+export function dropPreferDeepestGroups(
+  groupIds: string[],
+  groups: Group[],
+): string[] {
+  const uniq = [...new Set(groupIds)]
+  return uniq.filter((id) => {
+    for (const other of uniq) {
+      if (id === other) continue
+      if (isStrictAncestorOf(groups, id, other)) return false
+    }
+    return true
+  })
+}
+
+const CHILD_R_RATIO = 0.42
+const CHILD_Y_FRAC = 0.14
+
+/** Place a child circle fully inside its parent (supports multiple siblings side by side). */
+function layoutChildInParent(
+  parent: GroupCircle,
+  index: number,
+  siblingCount: number,
+): GroupCircle {
+  const r = Math.min(parent.r * CHILD_R_RATIO, parent.r * 0.48)
+  if (siblingCount <= 1) {
+    return {
+      cx: parent.cx,
+      cy: parent.cy + parent.r * CHILD_Y_FRAC,
+      r,
+    }
+  }
+  const maxOffset = parent.r * 0.5
+  const t = siblingCount > 1 ? index / (siblingCount - 1) : 0
+  const offsetX = (t - 0.5) * 2 * maxOffset
+  return {
+    cx: parent.cx + offsetX,
+    cy: parent.cy + parent.r * CHILD_Y_FRAC,
+    r: r * 0.92,
+  }
+}
+
+/**
+ * Merge root layouts with nested circles derived from `parentGroupId`.
+ * Runs until all reachable children get a circle (handles chains).
+ */
+export function expandNestedLayouts(
+  groups: Group[],
+  rootLayouts: Record<string, GroupCircle>,
+): Record<string, GroupCircle> {
+  const out: Record<string, GroupCircle> = { ...rootLayouts }
+  let progress = true
+  while (progress) {
+    progress = false
+    const byParent = new Map<string | null, Group[]>()
+    for (const g of groups) {
+      const k = g.parentGroupId
+      const list = byParent.get(k) ?? []
+      list.push(g)
+      byParent.set(k, list)
+    }
+    for (const g of groups) {
+      if (!g.parentGroupId || out[g.id]) continue
+      const parent = out[g.parentGroupId]
+      if (!parent) continue
+      const siblings = (byParent.get(g.parentGroupId) ?? []).sort((a, b) =>
+        a.id.localeCompare(b.id),
+      )
+      const idx = siblings.findIndex((s) => s.id === g.id)
+      out[g.id] = layoutChildInParent(parent, Math.max(0, idx), siblings.length)
+      progress = true
+    }
+  }
+  return out
+}
+
+/** Roots first (depth 0), then depth 1, … so parents render under children in SVG. */
+export function sortGroupsByDepthAsc(
+  groups: Group[],
+  layouts: Record<string, GroupCircle>,
+): Group[] {
+  const byId = groupById(groups)
+  const depth = (id: string): number => {
+    let d = 0
+    let c = byId.get(id)
+    while (c?.parentGroupId) {
+      d++
+      c = byId.get(c.parentGroupId)
+    }
+    return d
+  }
+  return groups
+    .filter((g) => layouts[g.id] != null)
+    .sort((a, b) => {
+      const da = depth(a.id)
+      const db = depth(b.id)
+      if (da !== db) return da - db
+      return a.id.localeCompare(b.id)
+    })
+}
+
 export function groupById(groups: Group[]): Map<string, Group> {
   return new Map(groups.map((g) => [g.id, g]))
 }
@@ -91,13 +212,14 @@ export function ringRadiusForCluster(
 ): number {
   const pts = groupIds.map((id) => layouts[id]).filter(Boolean)
   if (pts.length === 0) return 56
-  const fromCircles = Math.min(...pts.map((p) => Math.max(28, p.r - 52)))
+  const inset = (p: GroupCircle) => Math.max(12, Math.min(52, p.r * 0.38))
+  const fromCircles = Math.min(...pts.map((p) => Math.max(16, p.r - inset(p))))
   return Math.min(fromCircles, 88)
 }
 
 /**
- * Positions for items that appear on the canvas (direct membership in at least one laid-out group).
- * Items with the same set of canvas group memberships share a ring around the centroid of those circles.
+ * Positions for items on the canvas. Clustering uses **direct** memberships intersecting
+ * the canvas; items appear because of direct or inherited (effective) membership elsewhere in App.
  */
 export function layoutCanvasItemPositions(
   itemsOnCanvas: Item[],

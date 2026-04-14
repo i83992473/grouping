@@ -1,6 +1,6 @@
 # Grouping
 
-Visual grouping UI: items as avatar chips, groups as circles, drag-and-drop with [@dnd-kit](https://github.com/clauderic/dnd-kit). **Two overlapping groups** are on the canvas; dropping in the **intersection** assigns **both** groups. State is in-memory; persistence will go behind an API (e.g. AWS RDS) later.
+Visual grouping UI: items as avatar chips, groups as circles, drag-and-drop with [@dnd-kit](https://github.com/clauderic/dnd-kit). **Two root circles** can overlap (intersection adds **both** groups). **Nested groups** render as an inner circle (e.g. Sprint crew inside Core team); overlapping parent+child droppables resolve to the **deepest** group only—ancestors are implied by the tree. State is in-memory; persistence will go behind an API (e.g. AWS RDS) later.
 
 ## Local development
 

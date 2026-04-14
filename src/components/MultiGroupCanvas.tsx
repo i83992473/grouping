@@ -1,11 +1,12 @@
 import { useDroppable } from '@dnd-kit/core'
 import { CANVAS, type GroupCircle, droppableGroupId } from '../constants'
+import { groupById } from '../model'
 import type { Group, Item } from '../types'
 import { ItemChip } from './ItemChip'
 
 type Props = {
-  /** Groups that have a circle on the canvas (same order as drawn). */
   canvasGroups: Group[]
+  groups: Group[]
   layouts: Record<string, GroupCircle>
   items: Item[]
   itemPositions: Map<string, { x: number; y: number }>
@@ -14,12 +15,25 @@ type Props = {
   onOpenItem: (item: Item) => void
 }
 
+function depthOf(group: Group, all: Group[]): number {
+  const byId = groupById(all)
+  let d = 0
+  let c: Group | undefined = group
+  while (c?.parentGroupId) {
+    d++
+    c = byId.get(c.parentGroupId)
+  }
+  return d
+}
+
 function GroupDropCircle({
   group,
   layout,
+  stackOrder,
 }: {
   group: Group
   layout: GroupCircle
+  stackOrder: number
 }) {
   const dropId = droppableGroupId(group.id)
   const { setNodeRef, isOver } = useDroppable({ id: dropId })
@@ -35,6 +49,7 @@ function GroupDropCircle({
         top: `${((cy - r) / CANVAS.height) * 100}%`,
         width: `${(box / CANVAS.width) * 100}%`,
         aspectRatio: '1',
+        zIndex: 2 + stackOrder,
       }}
       aria-label={`Drop zone for ${group.name}`}
     />
@@ -43,6 +58,7 @@ function GroupDropCircle({
 
 export function MultiGroupCanvas({
   canvasGroups,
+  groups,
   layouts,
   items,
   itemPositions,
@@ -66,18 +82,20 @@ export function MultiGroupCanvas({
         {canvasGroups.map((g, i) => {
           const layout = layouts[g.id]
           if (!layout) return null
+          const depth = depthOf(g, groups)
+          const alt = i % 2 === 1
           return (
             <g key={g.id}>
               <circle
                 cx={layout.cx}
                 cy={layout.cy}
                 r={layout.r}
-                className={`group-canvas__circle ${i % 2 === 1 ? 'group-canvas__circle--alt' : ''}`.trim()}
+                className={`group-canvas__circle ${alt ? 'group-canvas__circle--alt' : ''} ${depth > 0 ? 'group-canvas__circle--nested' : ''}`.trim()}
                 filter="url(#group-shadow)"
               />
               <text
                 x={layout.cx}
-                y={layout.cy - layout.r - 12}
+                y={layout.cy - layout.r - 6}
                 textAnchor="middle"
                 className="group-canvas__label"
               >
@@ -88,10 +106,17 @@ export function MultiGroupCanvas({
         })}
       </svg>
 
-      {canvasGroups.map((g) => {
+      {canvasGroups.map((g, i) => {
         const layout = layouts[g.id]
         if (!layout) return null
-        return <GroupDropCircle key={`drop-${g.id}`} group={g} layout={layout} />
+        return (
+          <GroupDropCircle
+            key={`drop-${g.id}`}
+            group={g}
+            layout={layout}
+            stackOrder={i}
+          />
+        )
       })}
 
       {items.map((item) => {

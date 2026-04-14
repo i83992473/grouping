@@ -11,7 +11,7 @@
 import { useMemo, useState } from 'react'
 import {
   DND_PALETTE_ID,
-  GROUP_CIRCLE_LAYOUT,
+  ROOT_GROUP_CIRCLE_LAYOUT,
   parseItemDragId,
 } from './constants'
 import { ItemModal } from './components/ItemModal'
@@ -19,9 +19,12 @@ import { MultiGroupCanvas } from './components/MultiGroupCanvas'
 import { Palette } from './components/Palette'
 import {
   directGroupIds,
+  dropPreferDeepestGroups,
+  expandNestedLayouts,
   initials,
   itemTooltipWithGroups,
   layoutCanvasItemPositions,
+  sortGroupsByDepthAsc,
 } from './model'
 import type { Group, Item, Membership } from './types'
 import './App.css'
@@ -36,6 +39,7 @@ const seedItems: Item[] = [
 const seedGroups: Group[] = [
   { id: 'g1', name: 'Core team', parentGroupId: null },
   { id: 'g2', name: 'Design', parentGroupId: null },
+  { id: 'g3', name: 'Sprint crew', parentGroupId: 'g1' },
 ]
 
 function addMembership(
@@ -71,7 +75,7 @@ function dragEndHitsPalette(event: DragEndEvent): boolean {
   return (event.collisions ?? []).some((c) => c.id === DND_PALETTE_ID)
 }
 
-/** All group droppables the pointer intersects (Venn overlap adds every hit). */
+/** All group droppables the pointer intersects (then filtered for nested deepest-wins). */
 function groupIdsFromDragEnd(event: DragEndEvent): string[] {
   const raw = (event.collisions ?? [])
     .map((c) => String(c.id))
@@ -96,19 +100,22 @@ export default function App() {
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
   )
 
-  const canvasGroupIdSet = useMemo(
-    () =>
-      new Set(
-        groups
-          .filter((g) => GROUP_CIRCLE_LAYOUT[g.id] != null)
-          .map((g) => g.id),
-      ),
+  const layouts = useMemo(
+    () => expandNestedLayouts(groups, ROOT_GROUP_CIRCLE_LAYOUT),
     [groups],
   )
 
+  const canvasGroupIdSet = useMemo(() => {
+    const ids = new Set<string>()
+    for (const g of groups) {
+      if (layouts[g.id] != null) ids.add(g.id)
+    }
+    return ids
+  }, [groups, layouts])
+
   const canvasGroups = useMemo(
-    () => groups.filter((g) => GROUP_CIRCLE_LAYOUT[g.id] != null),
-    [groups],
+    () => sortGroupsByDepthAsc(groups, layouts),
+    [groups, layouts],
   )
 
   const itemsOnPalette = useMemo(
@@ -116,6 +123,7 @@ export default function App() {
     [items, memberships],
   )
 
+  /** Direct membership in at least one laid-out group (child-only still lays out in the inner circle). */
   const itemsOnCanvas = useMemo(
     () =>
       items.filter((i) => {
@@ -130,10 +138,10 @@ export default function App() {
       layoutCanvasItemPositions(
         itemsOnCanvas,
         memberships,
-        GROUP_CIRCLE_LAYOUT,
+        layouts,
         canvasGroupIdSet,
       ),
-    [itemsOnCanvas, memberships, canvasGroupIdSet],
+    [itemsOnCanvas, memberships, canvasGroupIdSet, layouts],
   )
 
   const activeDraggingItem = useMemo(() => {
@@ -158,7 +166,8 @@ export default function App() {
       return
     }
 
-    const groupIds = groupIdsFromDragEnd(event)
+    const raw = groupIdsFromDragEnd(event)
+    const groupIds = dropPreferDeepestGroups(raw, groups)
     if (groupIds.length === 0) return
 
     setMemberships((m) => {
@@ -185,9 +194,10 @@ export default function App() {
       <header className="app__header">
         <h1>Grouping</h1>
         <p className="app__sub">
-          Drag chips into one or both circles (overlap adds both groups), or
-          onto Ungrouped to clear. Click a chip for details. A short drag
-          threshold separates click from drag.
+          Nested circle (Sprint crew) sits inside Core team. Dropping there assigns
+          the child group; inheritance still rolls up to parents. Overlapping root
+          circles still add both groups. Ungrouped clears all. Click a chip for
+          details.
         </p>
       </header>
 
@@ -201,7 +211,8 @@ export default function App() {
         <div className="app__workspace">
           <MultiGroupCanvas
             canvasGroups={canvasGroups}
-            layouts={GROUP_CIRCLE_LAYOUT}
+            groups={groups}
+            layouts={layouts}
             items={itemsOnCanvas}
             itemPositions={itemPositions}
             tooltipForItem={tooltipForItem}
